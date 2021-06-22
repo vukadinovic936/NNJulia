@@ -76,53 +76,48 @@ function SGD(network::Network,
             push!(mini_batches_labels, @view train_labels[k:k+mini_batch_size-1])
         end
 
-        for mini_batch in mini_batches
+        for (mini_batch, labels) in (mini_batches,mini_batches_labels)
             # TODO create update_mini_batch
-            network = update_mini_batch(network, mini_batch, mini_batch_labels, η)
+            res = update_mini_batch(network,mini_batch,labels,0.01)
+            break
+            #network = update_mini_batch(network, mini_batch, mini_batch_labels, η)
         end
-#
-#        if test_data != nothing
-#            # TODO add evaluate test_data
-#            @printf "Epoch %d: %d / %d" j test_data n_test
-#        else
-#            @printf "Epoch %d: complete" j 
-#        end
+
     end
 end
 function update_mini_batch(network::Network, data, labels, η)
-    ∇w = [zero(network.weights)]
+    ∇w = copy(network.weights)
+    ∇w .= 0
     for (img,label) in zip(data,labels)
         ∇w += backprop(network,img,label)
     end
+    print(∇W)
+    print(size(∇W))
     network.weights = network.weights - η * ∇w
     return network
 end
 
 function backprop(network::Network, x, y)
-
-    ∇w = zero(network.weights)
+    ∇w = copy(network.weights)
+    ∇w .= 0
     zs, activations = feedforward(network,x,true)
-    δ = cost((@view activations[1:length(activations)-1]),y) * sigmoid_prime(@view zs[1:length(zs)-1])
-    ∇w = δ * transpose(@view activations[1:length(activations)-2])
-    for l in 2:network.num_layers
-        z = @view zs[1:length(zs)-l]
+    δ = cost((@view activations[length(activations)-1]),y) * sigmoid_prime(@view zs[length(zs)-1])
+    ∇w[length(∇w)-1] = δ * transpose(@view activations[length(activations)-2])
+    for l in 2:(network.num_layers-1)
+        z = @view zs[length(zs)-l]
         sp = sigmoid_prime(z)
-        δ = transpose(@view network.weights[1:length(zs)-l+1])
-        ∇w = 
+        δ = transpose(@view network.weights[length(zs)-l+1])*δ*sp
+        ∇w[length(∇w)-l] = delta * transpose(activations[length(activations)-l-1])
     end
+    return ∇w
 end
 ############### MAIN #################
 Random.seed!(123);
 train_x, train_y = MNIST.traindata()
 sample = train_x[:,:,1]
 n = Network([784,2,2])
-print(size(n.weights[1]))
 feedforward(n, sample)
+print(size(n.weights[1]))
+reshape(n.weights,(2,)
 SGD(n,train_x,train_y,1,8,0.01)
 #### NEXT TODO: MAKE INPUT (X,Y) where X is an image and Y a labeligof
-
-for (i,j) in zip(1:10,10:20)
-    print(i,j)
-end
-a = [1,2,3,4]
-@view a[:-1]
