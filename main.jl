@@ -17,6 +17,7 @@ Network(sizes) = Network(length(sizes),
 function sigmoid(z)
     return 1.0/(1.0 + exp(-z))
 end
+
 function eval_single(sample)
     mxval, mxindex =findmax(feedforward(n, sample))
     print("Digits predicted is\n")
@@ -30,7 +31,7 @@ function sigmoid_prime(z)
     return sigmoid(z)*(1-sigmoid(z))
 end
 
-function feedforward(network, input, keep_grad=false)
+function feedforward(network::Network, input, keep_grad=false)
     # TODO: Optimize
     output = transpose( reshape(input, (size(input)[1]*size(input)[2]) ))
     zs = []
@@ -62,7 +63,18 @@ end
 function cost(output,labels)
     return output-labels
 end
-    
+function evaluate(network,test_data,test_labels) 
+    cor=0
+    for it in 1:size(test_data)[3]
+        sample = @view test_data[:,:,it]
+        label = test_labels[it]
+        mxval, mxindex =findmax(feedforward(network, sample))
+        if mxindex[2]-1 == label
+            cor+=1
+        end
+    end
+    return cor/size(test_data)[3]*100
+end
 function SGD(network::Network,
              train_data,
              train_labels,
@@ -89,12 +101,13 @@ function SGD(network::Network,
             labels = mini_batches_labels[it]
             network = update_mini_batch(network,mini_batch,labels,0.01)
         end
+        println("### EPOCH DONE $j ###")
+        if test_data!==nothing
+            println(evaluate(network,test_data,test_labels))
+        end
+        println()
+    end
 
-        print( "###############")
-        print("EPOCH DONE")
-        print(j)
-        print( "###############")
-end
 end
 function update_mini_batch(network::Network, data, labels, η)
     ∇w = copy(network.weights)
@@ -127,16 +140,11 @@ function backprop(network::Network, x, y)
     return ∇w
 end
 ############### MAIN ################# Random.seed!(123);
+
 train_x, train_y = MNIST.traindata()
 test_x,test_y = MNIST.testdata()
-sample = test_x[:,:,10]
-correct_label= test_y[10]
-imshow(sample)
-print(correct_label)
-eval_single(sample)
-#n = Network([784,30,10])
-feedforward(n, sample,false)
-reshape(n.weights,(2,))
-SGD(n,train_x,train_y,1,8,0.01)
+n = Network([784,100,10])
+SGD(n,train_x,train_y,30,10,0.3,test_x,test_y)
 
+## TODO EVALUATE:kk
 #### NEXT TODO: MAKE INPUT (X,Y) where X is an image and Y a labeligof
