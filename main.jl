@@ -8,18 +8,28 @@ mutable struct Network
     num_layers::Integer
     sizes::Array{Integer}
     weights::Array{Array{Float64}}
+    biases::Array{Array{Float64}}
 end
 
 Network(sizes) = Network(length(sizes),
                          sizes,
-                         [ rand( sizes[i]+1 ,sizes[i+1]) for i in 1:length(sizes)-1] )
+                         [randn( sizes[i] ,sizes[i+1]) for i in 1:length(sizes)-1],
+                         [randn(sizes[i+1]) for i in 1:length(sizes)-1 ])
 
 function sigmoid(z)
     return 1.0/(1.0 + exp(-z))
 end
 
+function sigmoid_prime(z)
+    return sigmoid(z)*(1-sigmoid(z))
+end
+
+function cost(output,labels)
+    return output-labels
+end
+
 function eval_single(sample)
-    mxval, mxindex =findmax(feedforward(n, sample))
+    mxval, mxindex = findmax(feedforward(n, sample))
     print("Digits predicted is\n")
     print(mxindex[2]-1)
     print("\n")
@@ -27,21 +37,18 @@ function eval_single(sample)
     print(mxval)
     print("\n")
 end
-function sigmoid_prime(z)
-    return sigmoid(z)*(1-sigmoid(z))
-end
 
 function feedforward(network::Network, input, keep_grad=false)
-    # TODO: Optimize
+
     output = transpose( reshape(input, (size(input)[1]*size(input)[2]) ))
     zs = []
     activations = []
     append!(activations,[output])
     for i in 1:length(network.weights)
-        # adding 1 for biases
-        output=hcat(output,1)
+
         w = network.weights[i]
-        output = output * w
+        b = reshape(network.biases[i], (1,size(network.biases[i])[1]))
+        output = output * w + b
 
         if keep_grad
             append!(zs, [output])
@@ -53,16 +60,15 @@ function feedforward(network::Network, input, keep_grad=false)
             append!(activations, [output])
         end
     end
+
     if keep_grad
         return zs,activations
     else
         return output
     end
+
 end
 
-function cost(output,labels)
-    return output-labels
-end
 function evaluate(network,test_data,test_labels) 
     cor=0
     for it in 1:size(test_data)[3]
@@ -75,6 +81,7 @@ function evaluate(network,test_data,test_labels)
     end
     return cor/size(test_data)[3]*100
 end
+
 function SGD(network::Network,
              train_data,
              train_labels,
@@ -83,12 +90,14 @@ function SGD(network::Network,
              η,
              test_data=nothing,
              test_labels=nothing)
-    if test_data != nothing
-        n_test = length(test_data)
-        n = length(train_data)
-    end
+
     for j in 1:epochs
-        # TODO: Shuffle training data
+
+        # Shuffle data
+        shuffle_ids = shuffle(1: (size(train_data)[3]))
+        train_data = train_data[:,:,shuffle_ids]
+        train_labels = train_labels[shuffle_ids]
+
         mini_batches = []
         mini_batches_labels = []
         
@@ -96,55 +105,71 @@ function SGD(network::Network,
             push!(mini_batches, @view train_data[:,:,k:k+mini_batch_size-1])
             push!(mini_batches_labels, @view train_labels[k:k+mini_batch_size-1])
         end
+
         for it in 1:length(mini_batches_labels)
             mini_batch = mini_batches[it]
             labels = mini_batches_labels[it]
-            network = update_mini_batch(network,mini_batch,labels,0.01)
+            network = update_mini_batch(network,mini_batch,labels,η)
         end
+
         println("### EPOCH DONE $j ###")
         if test_data!==nothing
+            println(evaluate(network,train_data,train_labels))
             println(evaluate(network,test_data,test_labels))
         end
         println()
+
     end
 
 end
+
 function update_mini_batch(network::Network, data, labels, η)
-    ∇w = copy(network.weights)
-#    ∇w .= 0.0
+    ∇w = [zeros( (network.sizes[i],network.sizes[i+1]) ) for i in 1:length(network.sizes)-1]
+    ∇b = [zeros(network.sizes[i+1]) for i in 1:length(network.sizes)-1]
     for it in 1:(size(data)[3])
         img = @view data[:,:,it]
-        # make one hot encoded
+
+        # make labels one hot encoded
         label = zeros(10)
         label[labels[it]+1]=1
-        ∇w = backprop(network,img,label)
+
+        temp_b, temp_w = backprop(network,img,label)
+        ∇w = ∇w + temp_w
+        ∇b = ∇b + temp_b
     end
     network.weights = network.weights - η * ∇w
+    network.biases = network.biases - η * ∇b
     return network
 end
 
 function backprop(network::Network, x, y)
-    ∇w = copy(network.weights)
-#    ∇w .= 0.0
-    zs, activations = feedforward(network,x,true)
-    δ = cost(reshape(activations[length(activations)],10),y)
-    ∇w[length(∇w)] = transpose(hcat(δ * activations[length(activations)-1],δ))
+    ## TODO: FIX BACKPROP ADD SIGMOID PRIME
+    ∇w = [zeros( (network.sizes[i],network.sizes[i+1]) ) for i in 1:length(network.sizes)-1]
+    ∇b = [ zeros((network.sizes[i+1])) for i in 1:length(network.sizes)-1]
 
+    zs, activations = feedforward(network,x,true)
+    sp = sigmoid_prime.(zs[length(zs)])
+    δ = cost(reshape(activations[length(activations)],10),y)  .* reshape(sp,size(sp)[2],1)
+
+    δ = vec(δ)
+    ∇b[length(∇b)] = δ
+    ∇w[length(∇w)] = transpose(δ * activations[length(activations)-1])
     for l in 1:(network.num_layers-2)
         z =  zs[length(zs)-l]
         sp = sigmoid_prime.(z)
-        δ = (network.weights[length(zs)-l+1] * δ) #.* sp
-        δ = @view δ[1:length(δ)-1]
-        ∇w[length(∇w)-l] = transpose(hcat(δ * activations[length(activations)-l-1],δ))
+        δ = (network.weights[length(zs)-l+1] * δ) .* reshape(sp, (size(sp)[2],1))
+        δ = vec(δ)
+        ∇b[length(∇b)-l] = δ
+        ∇w[length(∇w)-l] = transpose(δ * activations[length(activations)-l-1])
     end
-    return ∇w
+    return ∇b,∇w
 end
-############### MAIN ################# Random.seed!(123);
 
+############### MAIN #################
+Random.seed!(123);
 train_x, train_y = MNIST.traindata()
 test_x,test_y = MNIST.testdata()
-n = Network([784,100,10])
+n = Network([784,20,10])
 SGD(n,train_x,train_y,30,10,0.3,test_x,test_y)
-
-## TODO EVALUATE:kk
-#### NEXT TODO: MAKE INPUT (X,Y) where X is an image and Y a labeligof
+#zero([1,1,1])
+#TODO: Hyperoptimize, test why when you increase the number of neurons accuracy drops
